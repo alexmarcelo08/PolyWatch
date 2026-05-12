@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendUserTelegramMessage } from "@/lib/telegram";
 import { formatLocal, nowIso } from "@/lib/time";
+import { requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function POST() {
   try {
-    await sendTelegramMessage(
+    const user = await requireUser();
+    await sendUserTelegramMessage(
+      user.id,
       [
-        "🚨 <b>Polymarket Wallet Activity</b>",
+        "Polymarket Wallet Activity",
         "",
         "Wallet: Test Wallet",
-        "Action: <b>TEST NOTIFICATION</b>",
+        "Action: TEST NOTIFICATION",
         "Market: Telegram integration check",
         "Side: YES",
         "Amount: $0",

@@ -1,6 +1,8 @@
 import type { PolymarketActivity, PolymarketPosition } from "./types";
+import { saveApiHealth } from "./storage";
 
 const BASE_URL = "https://data-api.polymarket.com";
+const REQUEST_TIMEOUT_MS = 8000;
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -14,11 +16,17 @@ async function fetchJson<T>(path: string, params: Record<string, string | number
 
   let lastError: Error | undefined;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    const started = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const response = await fetch(url, {
         headers: { "User-Agent": "polywatch-wallet-tracker/1.0" },
         cache: "no-store",
+        signal: controller.signal,
       });
+      const latencyMs = Date.now() - started;
+      await saveApiHealth({ endpoint: path, ok: response.ok, status: response.status, latencyMs });
       if (response.status === 429 || response.status >= 500) {
         await sleep(500 * 2 ** attempt);
         continue;
@@ -27,7 +35,10 @@ async function fetchJson<T>(path: string, params: Record<string, string | number
       return (await response.json()) as T;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      await saveApiHealth({ endpoint: path, ok: false, latencyMs: Date.now() - started, error: lastError.message }).catch(() => undefined);
       await sleep(500 * 2 ** attempt);
+    } finally {
+      clearTimeout(timeout);
     }
   }
   throw lastError ?? new Error(`Polymarket ${path} failed`);
