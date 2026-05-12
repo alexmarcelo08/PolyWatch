@@ -3,6 +3,7 @@ import { saveApiHealth } from "./storage";
 
 const BASE_URL = "https://data-api.polymarket.com";
 const REQUEST_TIMEOUT_MS = 8000;
+const SUCCESS_HEALTH_SAMPLE_RATE = 0.03;
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,7 +27,9 @@ async function fetchJson<T>(path: string, params: Record<string, string | number
         signal: controller.signal,
       });
       const latencyMs = Date.now() - started;
-      await saveApiHealth({ endpoint: path, ok: response.ok, status: response.status, latencyMs });
+      if (!response.ok || latencyMs > 1500 || Math.random() < SUCCESS_HEALTH_SAMPLE_RATE) {
+        await saveApiHealth({ endpoint: path, ok: response.ok, status: response.status, latencyMs }).catch(() => undefined);
+      }
       if (response.status === 429 || response.status >= 500) {
         await sleep(500 * 2 ** attempt);
         continue;

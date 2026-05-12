@@ -21,42 +21,8 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import type {
-  ActivityEvent,
-  ApiHealthSample,
-  CopyMode,
-  CopySettings,
-  CopyTradeIntent,
-  PollingState,
-  PositionSnapshot,
-  RiskSettings,
-  SystemState,
-  TelegramSettings,
-  Wallet,
-} from "@/lib/types";
-
-type SafeUser = { id: string; email: string; role: "admin" | "user" };
-
-type DashboardPayload = {
-  user: SafeUser;
-  wallets: Wallet[];
-  activity: ActivityEvent[];
-  copySettings: CopySettings[];
-  copyTradeIntents: CopyTradeIntent[];
-  positions: PositionSnapshot[];
-  pollingState: PollingState[];
-  apiHealth: ApiHealthSample[];
-  telegramSettings: TelegramSettings;
-  riskSettings: RiskSettings;
-  system: SystemState;
-  config: {
-    pollIntervalSeconds: number;
-    telegramConfigured: boolean;
-    storagePath: string;
-    autoTradingEnabled: boolean;
-    dryRun: boolean;
-  };
-};
+import type { ActivityEvent, CopyMode, CopySettings, CopyTradeIntent, Wallet } from "@/lib/types";
+import type { DashboardPayload } from "@/lib/dashboard-data";
 
 const emptyPayload: DashboardPayload = {
   user: { id: "", email: "", role: "user" },
@@ -294,9 +260,9 @@ function CopySettingsPanel({
   );
 }
 
-export function Dashboard() {
-  const [data, setData] = useState<DashboardPayload>(emptyPayload);
-  const [loading, setLoading] = useState(true);
+export function Dashboard({ initialData = emptyPayload }: { initialData?: DashboardPayload }) {
+  const [data, setData] = useState<DashboardPayload>(initialData);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [label, setLabel] = useState("");
   const [address, setAddress] = useState("");
@@ -304,7 +270,7 @@ export function Dashboard() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
   const [positionFilter, setPositionFilter] = useState("active");
-  const [telegramChatId, setTelegramChatId] = useState("");
+  const [telegramChatId, setTelegramChatId] = useState(initialData.telegramSettings.chatId);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "user" });
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
@@ -335,8 +301,8 @@ export function Dashboard() {
   }
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    const id = setInterval(() => void load(true), 10000);
+    const initial = window.setTimeout(() => void load(true), 1500);
+    const id = setInterval(() => void load(true), 15000);
     return () => {
       window.clearTimeout(initial);
       clearInterval(id);

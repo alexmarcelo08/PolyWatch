@@ -1,13 +1,13 @@
 import { runPollingTick } from "../src/lib/polling";
 
-const intervalMs = 1000;
+const intervalMs = 2500;
 let running = false;
 
 async function tick() {
   if (running) return;
   running = true;
   try {
-    const results = await runPollingTick(2);
+    const results = await runPollingTick(1);
     const events = results.reduce((sum, result) => sum + result.newEvents, 0);
     if (results.length > 0) console.log(`[polywatch] checked ${results.length} wallet(s), ${events} new event(s)`);
   } catch (error) {

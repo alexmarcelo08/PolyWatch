@@ -146,9 +146,13 @@ async function readDbUnsafe(): Promise<AppDatabase> {
 }
 
 async function writeDbUnsafe(db: AppDatabase) {
+  return writeDbStringUnsafe(JSON.stringify(db, null, 2));
+}
+
+async function writeDbStringUnsafe(serialized: string) {
   const file = dbPath();
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(db, null, 2));
+  await fs.writeFile(tmp, serialized);
   await fs.rename(tmp, file);
 }
 
@@ -189,9 +193,11 @@ async function withDb<T>(mutator: (db: AppDatabase) => T | Promise<T>) {
   await acquireLock();
   try {
     const db = await readDbUnsafe();
+    const before = JSON.stringify(db);
     const result = await mutator(db);
     cleanup(db);
-    await writeDbUnsafe(db);
+    const after = JSON.stringify(db);
+    if (after !== before) await writeDbStringUnsafe(JSON.stringify(db, null, 2));
     return result;
   } finally {
     await fs.unlink(lockPath()).catch(() => undefined);
@@ -426,7 +432,19 @@ export async function getPositionsForWallet(userId: string, walletId: string) {
 
 export async function replacePositionsForWallet(userId: string, walletId: string, positions: PositionSnapshot[]) {
   return withDb((db) => {
+    const stable = (position: PositionSnapshot) => {
+      const rest = { ...position } as Omit<PositionSnapshot, "updatedAt"> & { updatedAt?: string };
+      delete rest.updatedAt;
+      return rest;
+    };
+    const current = db.positions
+      .filter((position) => position.userId === userId && position.walletId === walletId)
+      .map(stable)
+      .sort((a, b) => a.key.localeCompare(b.key));
+    const next = positions.map(stable).sort((a, b) => a.key.localeCompare(b.key));
+    if (JSON.stringify(current) === JSON.stringify(next)) return false;
     db.positions = db.positions.filter((position) => !(position.userId === userId && position.walletId === walletId)).concat(positions);
+    return true;
   });
 }
 
