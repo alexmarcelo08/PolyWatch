@@ -46,7 +46,7 @@ function direction(delta: number) {
 
 function toSnapshot(userId: string, walletId: string, position: PolymarketPosition, prior?: PositionSnapshot): PositionSnapshot {
   const size = Number(position.size ?? 0);
-  const avgPrice = position.avgPrice ?? prior?.avgPrice;
+  const avgPrice = prior?.avgPrice ?? position.avgPrice;
   const previousAvgPrice = prior?.avgPrice;
   const delta = avgPrice !== undefined && previousAvgPrice !== undefined ? avgPrice - previousAvgPrice : 0;
   return {
@@ -63,7 +63,7 @@ function toSnapshot(userId: string, walletId: string, position: PolymarketPositi
     avgPriceChange: delta,
     avgPriceChangeDirection: direction(delta),
     latestTradePrice: prior?.latestTradePrice,
-    totalBought: position.totalBought ?? prior?.totalBought,
+    totalBought: prior?.totalBought ?? position.totalBought,
     totalSold: prior?.totalSold,
     currentValue: position.currentValue,
     cashPnl: position.cashPnl,
@@ -78,7 +78,10 @@ function applyTrade(prior: PositionSnapshot | undefined, trade: PolymarketActivi
   const size = Number(trade.size ?? 0);
   const price = Number(trade.price ?? 0);
   const before = prior?.size ?? 0;
-  const previousAvg = prior?.avgPrice;
+  const fallbackAvg = trade.side === "SELL" && before > EPSILON && prior?.avgPrice === undefined && prior?.totalBought && prior.totalBought > EPSILON
+    ? (prior.currentValue ?? 0) / prior.totalBought
+    : undefined;
+  const previousAvg = prior?.avgPrice ?? fallbackAvg;
   const key = trade.asset ? `${trade.conditionId}:${trade.asset}` : `${trade.conditionId}:unknown`;
   let after = before;
   let currentAvg = previousAvg;
@@ -97,7 +100,7 @@ function applyTrade(prior: PositionSnapshot | undefined, trade: PolymarketActivi
     totalBought += size;
   } else {
     after = Math.max(0, before - size);
-    currentAvg = after > EPSILON ? previousAvg : previousAvg;
+    currentAvg = previousAvg;
     status = after <= EPSILON ? "closing" : "reducing";
     action = after <= EPSILON ? "POSITION_CLOSED" : "SELL_FILLED";
     totalSold += size;

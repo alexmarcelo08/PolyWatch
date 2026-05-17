@@ -19,9 +19,10 @@ function formatNumber(value?: number) {
 
 export function buildTelegramMessage(event: ActivityEvent) {
   const lines = [
-    "Polymarket Wallet Activity",
+    "🚨 Polymarket Wallet Activity",
     "",
     `Wallet: ${escapeHtml(event.walletLabel)} (${compactAddress(event.address)})`,
+    `Profile: https://polymarket.com/${event.address}`,
     `Action: ${event.positionStatus ? `${event.side ?? ""} / ${event.positionStatus}` : event.action.replace(/_/g, " ")}`,
     `Market: ${escapeHtml(event.marketTitle)}`,
   ];
@@ -55,10 +56,11 @@ export function buildTelegramMessage(event: ActivityEvent) {
 
 export function buildCopyIntentMessage(intent: CopyTradeIntent) {
   return [
-    "PolyWatch Copy Trade",
+    "🚨 PolyWatch Copy Trade",
     "",
     `Status: ${intent.status}`,
     `Source Wallet: ${escapeHtml(intent.source_trade.walletLabel)}`,
+    `Profile: https://polymarket.com/${intent.source_trade.address}`,
     `Market: ${escapeHtml(intent.market)}`,
     `Outcome: ${escapeHtml(intent.outcome ?? "n/a")}`,
     `Side: ${intent.side ?? "n/a"}`,

@@ -48,6 +48,10 @@ function compactAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+function profileUrl(address: string) {
+  return `https://polymarket.com/${address}`;
+}
+
 function money(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return "n/a";
   return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -268,8 +272,10 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(initialData.wallets[0]?.id ?? null);
   const [positionFilter, setPositionFilter] = useState("active");
+  const [copyTab, setCopyTab] = useState<"wallets" | "paper">("wallets");
+  const [paperFilter, setPaperFilter] = useState<"all" | "pending" | "dry_run" | "blocked" | "executed">("all");
   const [telegramChatId, setTelegramChatId] = useState(initialData.telegramSettings.chatId);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "user" });
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -277,6 +283,10 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
   const selectedWallet = data.wallets.find((wallet) => wallet.id === selectedWalletId) ?? data.wallets[0];
   const selectedSettings = selectedWallet ? data.copySettings.find((settings) => settings.walletId === selectedWallet.id) : undefined;
   const activeWallets = useMemo(() => data.wallets.filter((wallet) => wallet.status === "active").length, [data.wallets]);
+  const paperIntents = useMemo(
+    () => data.copyTradeIntents.filter((intent) => paperFilter === "all" || intent.status === paperFilter),
+    [data.copyTradeIntents, paperFilter],
+  );
 
   const positions = useMemo(() => {
     if (!selectedWallet) return [];
@@ -292,7 +302,10 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
       const payload = await requestJson<DashboardPayload>("/api/dashboard");
       setData(payload);
       setTelegramChatId(payload.telegramSettings.chatId);
-      if (!selectedWalletId && payload.wallets[0]) setSelectedWalletId(payload.wallets[0].id);
+      setSelectedWalletId((current) => {
+        if (current && payload.wallets.some((wallet) => wallet.id === current)) return current;
+        return payload.wallets[0]?.id ?? null;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -307,8 +320,6 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
       window.clearTimeout(initial);
       clearInterval(id);
     };
-    // Dashboard polling intentionally owns its own cadence.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function add(event: FormEvent) {
@@ -418,6 +429,29 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
     setBusy(id);
     try {
       await requestJson(`/api/copy/intents/${id}/${action}`, { method: "POST" });
+      await load(true);
+    } catch (err) {
+      setNotice({ tone: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function enablePaperTrading() {
+    if (!selectedWallet) return;
+    setBusy("paper-enable");
+    try {
+      await requestJson(`/api/wallets/${selectedWallet.id}/copy-settings`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          copy_enabled: true,
+          copy_mode: "auto_copy",
+          copy_percentage: selectedSettings?.copy_percentage || 100,
+          max_copy_amount_usdc: selectedSettings?.max_copy_amount_usdc || 25,
+          priority_mode: true,
+        }),
+      });
+      setNotice({ tone: "success", text: `Paper trading enabled for ${selectedWallet.label}. New detected trades will create dry-run copy intents.` });
       await load(true);
     } catch (err) {
       setNotice({ tone: "error", text: err instanceof Error ? err.message : String(err) });
@@ -557,7 +591,9 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
                               <Badge tone={modeTone(settings?.copy_mode)}>{settings?.copy_mode?.replaceAll("_", " ") ?? "alert only"}</Badge>
                               <Badge tone={polling?.mode === "burst" ? "amber" : polling?.mode === "high_priority" ? "blue" : "zinc"}>{polling?.mode ?? "normal"}</Badge>
                             </div>
-                            <p className="mt-1 font-mono text-xs text-zinc-600">{compactAddress(wallet.address)}</p>
+                            <a className="mt-1 block font-mono text-xs font-semibold text-emerald-700 underline-offset-2 hover:underline" href={profileUrl(wallet.address)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+                              {compactAddress(wallet.address)}
+                            </a>
                             <p className="mt-1 text-xs text-zinc-500">Checked {formatDate(wallet.lastCheckedAt)} - latency {polling?.api_latency ? `${polling.api_latency}ms` : "n/a"}</p>
                             {wallet.lastError ? <p className="mt-1 text-xs text-red-700">{wallet.lastError}</p> : null}
                           </div>
@@ -583,17 +619,33 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
             </div>
           </section>
 
-          {selectedWallet ? <CopySettingsPanel key={selectedWallet.id} wallet={selectedWallet} settings={selectedSettings} onSaved={() => void load(true)} /> : null}
+          <section className="rounded-lg border border-zinc-200 bg-white p-2">
+            <div className="grid grid-cols-2 gap-2">
+              <button className={`h-10 rounded-md text-sm font-semibold ${copyTab === "wallets" ? "bg-zinc-950 text-white" : "border border-zinc-200 text-zinc-700"}`} onClick={() => setCopyTab("wallets")}>
+                Wallet Copy Config
+              </button>
+              <button className={`h-10 rounded-md text-sm font-semibold ${copyTab === "paper" ? "bg-zinc-950 text-white" : "border border-zinc-200 text-zinc-700"}`} onClick={() => setCopyTab("paper")}>
+                Paper Trading
+              </button>
+            </div>
+          </section>
+
+          {copyTab === "wallets" && selectedWallet ? <CopySettingsPanel key={selectedWallet.id} wallet={selectedWallet} settings={selectedSettings} onSaved={() => void load(true)} /> : null}
 
           {selectedWallet ? (
             <section className="rounded-lg border border-zinc-200 bg-white">
               <div className="flex flex-col gap-3 border-b border-zinc-200 px-4 py-3 md:flex-row md:items-center md:justify-between">
-                <h2 className="text-base font-semibold">{selectedWallet.label} Positions</h2>
-                <select className="h-9 rounded-md border border-zinc-300 px-3 text-sm" value={positionFilter} onChange={(event) => setPositionFilter(event.target.value)}>
-                  <option value="active">Active</option>
-                  <option value="closed">Closed</option>
-                  <option value="all">All</option>
-                </select>
+              <h2 className="text-base font-semibold">{selectedWallet.label} Positions</h2>
+                <div className="flex flex-wrap gap-2">
+                  <a className="inline-flex h-9 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-emerald-700" href={profileUrl(selectedWallet.address)} target="_blank" rel="noreferrer">
+                    Profile
+                  </a>
+                  <select className="h-9 rounded-md border border-zinc-300 px-3 text-sm" value={positionFilter} onChange={(event) => setPositionFilter(event.target.value)}>
+                    <option value="active">Active</option>
+                    <option value="closed">Closed</option>
+                    <option value="all">All</option>
+                  </select>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 {positions.length === 0 ? (
@@ -634,14 +686,31 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
             </section>
           ) : null}
 
+          {copyTab === "paper" ? (
           <section className="rounded-lg border border-zinc-200 bg-white">
-            <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3">
+            <div className="flex flex-col gap-3 border-b border-zinc-200 px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2">
               <Shield size={18} />
-              <h2 className="text-base font-semibold">Copy Trade Intents</h2>
+              <h2 className="text-base font-semibold">Paper Trading</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedWallet ? (
+                  <button className="h-9 rounded-md bg-emerald-600 px-3 text-sm font-semibold text-white disabled:opacity-50" onClick={enablePaperTrading} disabled={busy === "paper-enable"}>
+                    Enable For {selectedWallet.label}
+                  </button>
+                ) : null}
+                <select className="h-9 rounded-md border border-zinc-300 px-3 text-sm" value={paperFilter} onChange={(event) => setPaperFilter(event.target.value as typeof paperFilter)}>
+                  <option value="all">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="dry_run">Dry Run</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="executed">Executed</option>
+                </select>
+              </div>
             </div>
             <div className="overflow-x-auto">
-              {data.copyTradeIntents.length === 0 ? (
-                <div className="px-4 py-10 text-center text-sm text-zinc-600">No copy trade intents yet.</div>
+              {paperIntents.length === 0 ? (
+                <div className="px-4 py-10 text-center text-sm text-zinc-600">No paper trades yet.</div>
               ) : (
                 <table className="w-full min-w-[980px] text-left text-sm">
                   <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
@@ -657,11 +726,15 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200">
-                    {data.copyTradeIntents.map((intent) => (
+                    {paperIntents.map((intent) => (
                       <tr key={intent.id} className="align-top">
                         <td className="whitespace-nowrap px-4 py-3 text-zinc-600">{formatDate(intent.created_at)}</td>
                         <td className="px-4 py-3"><Badge tone={statusTone(intent.status)}>{intent.status}</Badge></td>
-                        <td className="px-4 py-3">{intent.source_wallet}</td>
+                        <td className="px-4 py-3">
+                          <a className="font-semibold text-emerald-700 underline-offset-2 hover:underline" href={profileUrl(intent.source_trade.address)} target="_blank" rel="noreferrer">
+                            {intent.source_wallet}
+                          </a>
+                        </td>
                         <td className="max-w-sm px-4 py-3">{intent.market}<p className="mt-1 text-xs text-zinc-500">{intent.reason}</p></td>
                         <td className="px-4 py-3">{intent.side ?? "n/a"} {intent.outcome ?? ""}</td>
                         <td className="px-4 py-3">{money(intent.copied_amount)}</td>
@@ -683,6 +756,7 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
               )}
             </div>
           </section>
+          ) : null}
 
           <section className="rounded-lg border border-zinc-200 bg-white">
             <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3">
@@ -711,7 +785,11 @@ export function Dashboard({ initialData = emptyPayload }: { initialData?: Dashbo
                     {data.activity.map((event) => (
                       <tr key={event.id} className="align-top">
                         <td className="whitespace-nowrap px-4 py-3 text-zinc-600">{formatDate(event.timestamp)}</td>
-                        <td className="whitespace-nowrap px-4 py-3 font-medium">{event.walletLabel}</td>
+                        <td className="whitespace-nowrap px-4 py-3 font-medium">
+                          <a className="text-emerald-700 underline-offset-2 hover:underline" href={profileUrl(event.address)} target="_blank" rel="noreferrer">
+                            {event.walletLabel}
+                          </a>
+                        </td>
                         <td className="px-4 py-3"><ActionBadge event={event} /><p className="mt-1 text-xs text-zinc-500">{event.positionStatus}</p></td>
                         <td className="max-w-sm px-4 py-3">{event.marketTitle}<p className="mt-1 text-xs text-zinc-500">{event.outcome ?? "n/a"}</p></td>
                         <td className="whitespace-nowrap px-4 py-3">{numberValue(event.size)}</td>

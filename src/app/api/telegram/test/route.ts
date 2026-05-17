@@ -11,7 +11,7 @@ export async function POST() {
     await sendUserTelegramMessage(
       user.id,
       [
-        "Polymarket Wallet Activity",
+        "🚨 Polymarket Wallet Activity",
         "",
         "Wallet: Test Wallet",
         "Action: TEST NOTIFICATION",

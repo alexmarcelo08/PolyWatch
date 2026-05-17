@@ -26,7 +26,14 @@ function includesOutcome(patterns: string[], outcome?: string) {
   return patterns.some((pattern) => pattern.trim().toLowerCase() === (outcome ?? "").trim().toLowerCase());
 }
 
-function baseIntent(wallet: Wallet, event: ActivityEvent, copiedAmount: number, status: IntentStatus, reason: string): Omit<CopyTradeIntent, "id" | "created_at"> {
+function invertOutcome(outcome?: string) {
+  const normalized = outcome?.trim().toUpperCase();
+  if (normalized === "YES") return "NO";
+  if (normalized === "NO") return "YES";
+  return outcome;
+}
+
+function baseIntent(wallet: Wallet, event: ActivityEvent, settings: CopySettings, copiedAmount: number, status: IntentStatus, reason: string): Omit<CopyTradeIntent, "id" | "created_at"> {
   return {
     userId: wallet.userId,
     walletId: wallet.id,
@@ -35,10 +42,10 @@ function baseIntent(wallet: Wallet, event: ActivityEvent, copiedAmount: number, 
     copied_amount: copiedAmount,
     original_amount: event.amountUsd ?? 0,
     market: event.marketTitle,
-    outcome: event.outcome,
+    outcome: settings.inverse_copy ? invertOutcome(event.outcome) : event.outcome,
     side: event.side,
     status,
-    reason,
+    reason: settings.inverse_copy ? `${reason}; inverse copy` : reason,
     source_previous_avg_price: event.previousAvgPrice,
     source_new_avg_price: event.currentAvgPrice,
     source_avg_price_change: event.avgPriceChange,
@@ -95,37 +102,37 @@ export async function handleCopyTrade(wallet: Wallet, event: ActivityEvent) {
   const amount = copyAmount(settings, event);
   const blockReason = await validate(settings, event, amount);
   if (blockReason) {
-    const intent = await saveCopyIntent(baseIntent(wallet, event, amount, "blocked", blockReason));
+    const intent = await saveCopyIntent(baseIntent(wallet, event, settings, amount, "blocked", blockReason));
     await sendCopyIntentNotification(intent).catch(() => undefined);
     return intent;
   }
 
   if (settings.copy_mode === "manual_confirm") {
-    const intent = await saveCopyIntent(baseIntent(wallet, event, amount, "pending", "Awaiting manual confirmation"));
+    const intent = await saveCopyIntent(baseIntent(wallet, event, settings, amount, "pending", "Awaiting manual confirmation"));
     await sendCopyIntentNotification(intent).catch(() => undefined);
     return intent;
   }
 
   const env = getRiskConfig();
-  if (!env.autoTradingEnabled) {
-    const intent = await saveCopyIntent(baseIntent(wallet, event, amount, "blocked", "AUTO_TRADING_ENABLED=false"));
+  if (env.dryRun) {
+    const intent = await saveCopyIntent(baseIntent(wallet, event, settings, amount, "dry_run", "DRY_RUN=true; no order sent"));
     await sendCopyIntentNotification(intent).catch(() => undefined);
     return intent;
   }
 
-  if (env.dryRun) {
-    const intent = await saveCopyIntent(baseIntent(wallet, event, amount, "dry_run", "DRY_RUN=true; no order sent"));
+  if (!env.autoTradingEnabled) {
+    const intent = await saveCopyIntent(baseIntent(wallet, event, settings, amount, "blocked", "AUTO_TRADING_ENABLED=false"));
     await sendCopyIntentNotification(intent).catch(() => undefined);
     return intent;
   }
 
   if (!env.privateKeyConfigured) {
-    const intent = await saveCopyIntent(baseIntent(wallet, event, amount, "blocked", "POLYMARKET_PRIVATE_KEY missing"));
+    const intent = await saveCopyIntent(baseIntent(wallet, event, settings, amount, "blocked", "POLYMARKET_PRIVATE_KEY missing"));
     await sendCopyIntentNotification(intent).catch(() => undefined);
     return intent;
   }
 
-  const intent = await saveCopyIntent(baseIntent(wallet, event, amount, "failed", "Execution adapter TODO; no order sent"));
+  const intent = await saveCopyIntent(baseIntent(wallet, event, settings, amount, "failed", "Execution adapter TODO; no order sent"));
   await sendCopyIntentNotification(intent).catch(() => undefined);
   return intent;
 }
